@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# The Milan dataset is redistributed by its original providers, not by us.
+# See data/README.md for how to obtain it.
+data/*.txt
+data/*.txt.txt
+data/*.npz
+
+# Trained model archives and scratch output
+*.zip
+chart_*.png

@@ -1,0 +1,12 @@
+# Exact versions used for every number reported in the paper.
+# Later versions will very likely work; these are what was actually run.
+stable-baselines3==2.9.0
+gymnasium==1.3.0
+torch==2.13.0
+numpy==2.5.2
+matplotlib==3.10.0
+scipy==1.15.0
+
+# NOTE: do NOT install the legacy `gym` package. Stable-Baselines3 imports it
+# opportunistically in patch_gym.py and emits a deprecation warning on every
+# run if it is present. This project targets Gymnasium only.
