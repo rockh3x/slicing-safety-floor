@@ -11,7 +11,11 @@ never fall below `demand × h` is usually assumed to be at worst conservative.
 This repository contains the simulator, sweeps and analysis showing that below a
 derivable threshold `h* = 1.3765` it is actively harmful: it censors the policy
 gradient on exactly the states it exists to protect, and produces **10.4×** more
-critical SLA violations during training than using no floor at all.
+critical SLA violations during training than using no floor at all. It also
+contains the remedy the paper proposes, *reserve-then-allocate*
+(`SlicingGymEnv(floor_mode="reserve")`): the same floor reserved first, with
+the action dividing only the remaining capacity, which removes the invariant
+region by construction.
 
 ## Two things to read before the code
 
@@ -75,7 +79,9 @@ pass the flags shown.
 | Table 6, Fig. 3: entropy, floor only (Sec. 6.4) | `python sweeps/fix_sweep.py --overrides 0 --ent-coefs 0 0.001 0.003 0.01 0.03 --jobs 8` |
 | Table 6, Fig. 3: entropy with override cost (Sec. 6.4) | `python sweeps/fix_sweep.py --overrides 2.0 --ent-coefs 0 0.001 0.003 0.01 0.03 --jobs 8` |
 | Table 7, Fig. 4: deferred floor (Sec. 6.5) | `python sweeps/delay_sweep.py --jobs 8` |
-| Table 8: fixed-rule baselines (Sec. 6.6) | `python sweeps/baseline_eval.py` |
+| Table 8, Fig. 5: reservation (Sec. 6.6) | `python sweeps/plateau_sweep.py --floor-mode reserve --headrooms 1.0 1.2 1.35 1.38 --steps 1000000 --ckpt-every 50000 --lr 1e-4 --target-kl 0.02 --jobs 8 --out reserve_sweep.csv --traj reserve_traj.csv` |
+| Table 8, Fig. 5: projection controls (Sec. 6.6) | `python sweeps/plateau_sweep.py --floor-mode clip --headrooms 1.2 1.38 --steps 1000000 --ckpt-every 50000 --lr 1e-4 --target-kl 0.02 --jobs 8 --out clip_sweep.csv --traj clip_traj.csv` |
+| Table 9: fixed-rule baselines (Sec. 6.7) | `python sweeps/baseline_eval.py` |
 | Learning-rate comparison (Sec. 6.2) | `python sweeps/plateau_sweep.py --headrooms 1.35 --steps 1000000 --ckpt-every 50000 --lr 3e-4 --jobs 8` |
 
 Sweeps append to `*_sweep.csv` / `*_traj.csv` in the working directory. Each
@@ -94,17 +100,24 @@ to the repository root:
 python figures/chart_movie.py      # Fig. 2  fig_trap.pdf
 python figures/chart_entropy.py    # Fig. 3  fig_entropy.pdf
 python figures/chart_delay.py      # Fig. 4  fig_delay.pdf
+python figures/chart_reserve.py    # Fig. 5  fig_reserve.pdf
+python figures/reserve_analysis.py # Table 8 numbers and paired Wilcoxon tests
 ```
+
+`plateau_sweep.py` refuses to append to an existing output file whose header
+differs from the one it would write, so a changed script cannot silently
+misalign old rows (known issue 3 below). Point `--out`/`--traj` at new files.
 
 ## What the violation count counts
 
 `crit` and `total_viol` count SLA violations of **both** latency-critical slices,
 `urllc` (5 ms) and `volte` (20 ms). `frac_below_hstar` is the fraction of steps
 on which the **urllc** allocation ratio is below `h*`, which equals the URLLC
-violation fraction exactly. With the floor active the two agree, because the
-floor at 1.35 lies above VoLTE's own threshold (1.258) and VoLTE never violates.
-With the floor off they do not: about half of the unshielded runs' violations
-(1058 of 2148) are VoLTE violations.
+violation fraction exactly. With a floor of `h ≥ 1.35` the two agree, because
+such a floor lies above VoLTE's own threshold (1.258) and VoLTE cannot violate.
+Without a floor, or with one below 1.258, they do not: about half of the
+unshielded runs' violations (1058 of 2148), and most of those under projection
+at `h = 1.2` (2078 of 2816), are VoLTE violations.
 
 ## Provenance of the result files
 
@@ -135,6 +148,9 @@ rows only:
   summaries predate those columns.
 - `lr3e4_1m.csv`, `lr3e4_1m_traj.csv`: the learning-rate comparison
 - `baseline_eval.csv`: the fixed-rule allocators
+- `reserve_sweep.csv`, `reserve_traj.csv`: reserve-then-allocate at
+  `h = 1.0, 1.2, 1.35, 1.38` (column `floor_mode = reserve`)
+- `clip_sweep.csv`, `clip_traj.csv`: projection controls at `h = 1.2, 1.38`
 
 The delay trajectory block assignment was verified against `delay_sweep_real.csv`
 by matching `alloc_ratio`, `frac_plateau` and `frac_below_hstar` at the final

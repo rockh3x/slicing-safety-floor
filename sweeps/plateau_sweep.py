@@ -56,6 +56,7 @@ USAGE
      python sweeps/plateau_sweep.py                          # full sweep, 8 seeds
      python sweeps/plateau_sweep.py --headrooms 0 1.35       # control vs collapse
      python sweeps/plateau_sweep.py --seeds 4 --steps 150000 # quick look
+     python sweeps/plateau_sweep.py --floor-mode reserve ... # reserve-then-allocate
      The defaults are the original exploratory settings (lr 3e-4, no KL cap,
      250k steps). The paper's configuration is given in README.md.
 
@@ -91,11 +92,36 @@ def self_sufficiency_threshold():
     return 1.0 / load_star, u
 
 
-def make_env(headroom, reward, seed):
-    """headroom == 0 means the safety layer is OFF - the control condition."""
+def make_env(headroom, reward, seed, floor_mode="clip"):
+    """headroom == 0 means the safety layer is OFF - the control condition.
+
+    floor_mode selects how the floor is enforced when it is on: "clip" is the
+    projection the paper diagnoses, "reserve" the reserve-then-allocate
+    parameterisation it proposes (see gym_env)."""
     return SlicingGymEnv(reward=reward, safe=(headroom > 0),
                          headroom=(headroom if headroom > 0 else 1.0),
-                         episode_steps=144, seed=seed)
+                         episode_steps=144, seed=seed, floor_mode=floor_mode)
+
+
+def open_csv(path, header):
+    """Open `path` for appending, writing `header` if the file is new.
+
+    Refuses to append to an existing file whose header differs: rows written
+    under a stale header end up silently misaligned, which is how
+    fix_sweep_real.csv came to have shifted columns (README, known issue 3).
+    """
+    if os.path.exists(path) and os.path.getsize(path) > 0:
+        with open(path, newline="") as f:
+            existing = next(csv.reader(f), [])
+        if existing != header:
+            raise SystemExit(f"{path} was written with a different header; "
+                             "choose a new file with --out / --traj.")
+        fh = open(path, "a", newline="")
+        return fh, csv.writer(fh)
+    fh = open(path, "a", newline="")
+    w = csv.writer(fh)
+    w.writerow(header)
+    return fh, w
 
 
 def policy_request(env, action):
@@ -112,9 +138,10 @@ def policy_request(env, action):
 
 
 # ---------------------------------------------------------------------------
-def evaluate(model, headroom, reward, h_star, eval_seed=100, episodes=3):
+def evaluate(model, headroom, reward, h_star, eval_seed=100, episodes=3,
+             floor_mode="clip"):
     """Roll out deterministically and collect the plateau diagnostics."""
-    ev = make_env(headroom, reward, eval_seed)
+    ev = make_env(headroom, reward, eval_seed, floor_mode)
     logs, req, floor, ratio, plateau = [], [], [], [], []
     # THROUGHPUT. The capacity pool is hard-capped, so "units granted" is a
     # near-constant under overload and says nothing. The quantity that varies,
@@ -178,10 +205,12 @@ class Trajectory(BaseCallback):
     144-step rollout per checkpoint, which is noise next to training.
     """
 
-    def __init__(self, headroom, reward, seed, h_star, writer, fh, every):
+    def __init__(self, headroom, reward, seed, h_star, writer, fh, every,
+                 floor_mode="clip"):
         super().__init__()
         self.hr, self.reward, self.seed = headroom, reward, seed
         self.h_star, self.w, self.fh, self.every = h_star, writer, fh, every
+        self.floor_mode = floor_mode
         self._next = every
         self.history = []            # (timestep, crit) - the window metric's input
         self.rows = []               # buffered rows; a parallel worker returns
@@ -191,7 +220,8 @@ class Trajectory(BaseCallback):
         if self.num_timesteps < self._next:
             return True
         self._next += self.every
-        m = evaluate(self.model, self.hr, self.reward, self.h_star, episodes=1)
+        m = evaluate(self.model, self.hr, self.reward, self.h_star, episodes=1,
+                     floor_mode=self.floor_mode)
         self.history.append((self.num_timesteps, m["crit"]))
         row = [self.hr, self.seed, self.num_timesteps,
                round(m["mean_req"], 3), round(m["alloc_ratio"], 4),
@@ -232,23 +262,25 @@ def window_metrics(history, window):
 def run_point(args_tuple):
     """One (headroom, seed) run. Takes a single tuple and returns a plain dict
     so it can be dispatched to a worker process by multiprocessing.Pool."""
-    (headroom, reward, steps, seed, h_star, every, window, hp) = args_tuple
+    (headroom, reward, steps, seed, h_star, every, window, hp,
+     floor_mode) = args_tuple
     try:                              # stop workers oversubscribing the cores
         import torch
         torch.set_num_threads(1)
     except Exception:
         pass
-    env = make_env(headroom, reward, seed)
+    env = make_env(headroom, reward, seed, floor_mode)
     m = PPO("MlpPolicy", env, verbose=0, seed=seed,
             n_steps=hp["n_steps"], batch_size=hp["batch_size"],
             learning_rate=hp["lr"], ent_coef=hp["ent_coef"],
             target_kl=hp["target_kl"], gamma=0.95, device="cpu")
-    cb = Trajectory(headroom, reward, seed, h_star, None, None, every)
+    cb = Trajectory(headroom, reward, seed, h_star, None, None, every,
+                    floor_mode=floor_mode)
     t0 = time.time()
     m.learn(total_timesteps=steps, callback=cb)
     secs = time.time() - t0
 
-    out = evaluate(m, headroom, reward, h_star)
+    out = evaluate(m, headroom, reward, h_star, floor_mode=floor_mode)
     out.update(window_metrics(cb.history, window))
     out["abdicated"] = int(out["ratio"] < 1.0)   # legacy label, kept for continuity
     out["train_s"] = secs
@@ -280,6 +312,8 @@ def main():
     ap.add_argument("--batch-size", type=int, default=128)
     ap.add_argument("--jobs", type=int, default=1,
                     help="parallel training runs; 1 keeps it sequential")
+    ap.add_argument("--floor-mode", choices=["clip", "reserve"], default="clip",
+                    help="how the floor is enforced when headroom > 0")
     ap.add_argument("--out", default="plateau_sweep.csv")
     ap.add_argument("--traj", default="plateau_traj.csv")
     a = ap.parse_args()
@@ -291,26 +325,24 @@ def main():
     print(f"h* = {h_star:.4f}  (derived: {u.L_FLOOR}+{u.A}*max(0,1/h-{u.KNEE})"
           f"^{u.K} = {u.sla_target} ms)")
     print("headroom 0 = safety layer OFF (the control)")
+    print(f"floor mode: {a.floor_mode}")
     print(f"{n} runs: {len(a.headrooms)} headrooms x {a.seeds} seeds "
           f"@ {a.steps:,} steps, {a.jobs} in parallel\n")
 
-    new_s, new_t = not os.path.exists(a.out), not os.path.exists(a.traj)
-    fs = open(a.out, "a", newline="")
-    ft = open(a.traj, "a", newline="")
-    ws, wt = csv.writer(fs), csv.writer(ft)
-    if new_s:
-        ws.writerow(["headroom", "seed", "steps",
-                     "carried", "served_urllc", "served_volte", "served_video", "utilisation",
-                     "mean_crit_win", "max_crit_win", "frac_unsafe_win", "n_win",
-                     "alloc_ratio", "frac_below_hstar", "frac_plateau", "ratio",
-                     "abdicated", "crit", "urllc", "viol_rate", "mean_req",
-                     "mean_floor", "h_star", "lr", "ent_coef", "target_kl",
-                     "train_s"])
-    if new_t:
-        wt.writerow(["headroom", "seed", "timestep", "mean_req", "alloc_ratio",
-                     "frac_plateau", "frac_below_hstar", "crit"])
+    fs, ws = open_csv(a.out, [
+        "headroom", "seed", "steps",
+        "carried", "served_urllc", "served_volte", "served_video", "utilisation",
+        "mean_crit_win", "max_crit_win", "frac_unsafe_win", "n_win",
+        "alloc_ratio", "frac_below_hstar", "frac_plateau", "ratio",
+        "abdicated", "crit", "urllc", "viol_rate", "mean_req",
+        "mean_floor", "h_star", "lr", "ent_coef", "target_kl",
+        "train_s", "floor_mode"])
+    ft, wt = open_csv(a.traj, [
+        "headroom", "seed", "timestep", "mean_req", "alloc_ratio",
+        "frac_plateau", "frac_below_hstar", "crit"])
 
-    jobs = [(hr, a.reward, a.steps, seed, h_star, a.ckpt_every, a.window, hp)
+    jobs = [(hr, a.reward, a.steps, seed, h_star, a.ckpt_every, a.window, hp,
+             a.floor_mode)
             for hr in a.headrooms for seed in range(a.seeds)]
 
     def emit(r):
@@ -330,7 +362,7 @@ def main():
                          round(r["viol_rate"], 4), round(r["mean_req"], 3),
                          round(r["mean_floor"], 3), round(h_star, 4),
                      a.lr, a.ent_coef, a.target_kl,
-                     round(r["train_s"], 1)])
+                     round(r["train_s"], 1), a.floor_mode])
         fs.flush(); ft.flush()
         label = "OFF  " if hr == 0 else f"{hr:<5}"
         print(f"hr={label} s{seed}  "

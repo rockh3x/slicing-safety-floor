@@ -36,12 +36,18 @@ REWARD
     PENALTY_WEIGHT. The default, "R1_baseline", is the original design kept
     for the reward study.
 
-SAFETY LAYER  (safe=True)
-    Raises each latency-critical slice to its floor, min(demand * headroom,
-    capacity / 2), and reclaims the excess only from what each slice asked
-    for above its own floor - see _safety_filter. Every clip is counted in
-    info["clipped"] and the capacity the filter moved in info["override"], so
-    "how often did the policy try to violate safety?" is measurable.
+SAFETY LAYER  (safe=True), two implementations of the same floor
+    floor_mode="clip" (default; the filter the paper diagnoses): raises each
+    latency-critical slice to its floor, min(demand * headroom, capacity / 2),
+    and reclaims the excess only from what each slice asked for above its own
+    floor - see _safety_filter. Every clip is counted in info["clipped"] and
+    the capacity the filter moved in info["override"], so "how often did the
+    policy try to violate safety?" is measurable.
+
+    floor_mode="reserve" (the remedy the paper proposes): reserves the floors
+    first and lets the action divide only the remaining capacity - see
+    _reserve_then_allocate. Same floors, no clipping, no action-invariant
+    region.
 """
 
 import numpy as np
@@ -69,14 +75,17 @@ class SlicingGymEnv(gym.Env):
 
     def __init__(self, capacity=100.0, episode_steps=144, seed=0,
                  safe=False, headroom=1.5, isolation=True, verbose=False,
-                 reward="R1_baseline"):
+                 reward="R1_baseline", floor_mode="clip"):
         super().__init__()
+        if floor_mode not in ("clip", "reserve"):
+            raise ValueError(f"floor_mode must be 'clip' or 'reserve', got {floor_mode!r}")
         self.reward_name = reward
         self.reward_fn = REWARDS[reward]
         self.capacity = float(capacity)
         self.episode_steps = int(episode_steps)
         self.safe = bool(safe)
         self.headroom = float(headroom)
+        self.floor_mode = floor_mode
         self.isolation = bool(isolation)
         self._seed = seed
         self.verbose = verbose
@@ -131,14 +140,19 @@ class SlicingGymEnv(gym.Env):
 
         policy_request = dict(units)     # what the agent itself asked for
         clipped = 0
-        if self.safe:
-            units, clipped = self._safety_filter(units)
-
-        # How far did the filter move the agent's action? If this is large on
-        # every step, the constraint is not shaping a learned policy - it is
-        # REPLACING it, and the agent is decorative. Measured, not assumed.
-        override = sum(abs(units[n] - policy_request[n])
-                       for n in units) / self.capacity
+        if self.safe and self.floor_mode == "reserve":
+            units = self._reserve_then_allocate(share)
+            # Nothing was requested below a floor and then corrected: the
+            # action only ever divides the capacity left after the floors.
+            override = 0.0
+        else:
+            if self.safe:
+                units, clipped = self._safety_filter(units)
+            # How far did the filter move the agent's action? If this is large
+            # on every step, the constraint is not shaping a learned policy -
+            # it is REPLACING it, and the agent is decorative.
+            override = sum(abs(units[n] - policy_request[n])
+                           for n in units) / self.capacity
 
         _, _, _, info = self.env.step(units)
 
@@ -201,6 +215,35 @@ class SlicingGymEnv(gym.Env):
                     discretionary[n] * spare / total_discretionary
                     if total_discretionary > 0 else 0.0)
         return granted, n_clipped
+
+    # ---------------------------------------------------------------
+    def _reserve_then_allocate(self, share):
+        """Feasibility-preserving alternative to _safety_filter.
+
+        Reserve each latency-critical slice's floor FIRST, then let the policy's
+        softmax divide only the capacity that remains:
+
+            f_i = min(d_i * h, C/2)  for priority <= 2,  0 otherwise
+            a_i = f_i + share_i * (C - sum_j f_j)
+
+        Every action is feasible, so nothing is ever clipped and there is no
+        action-invariant region: da_i/dshare_i = C - sum_j f_j > 0 whenever the
+        floors leave any capacity spare. If the floors alone exceed capacity
+        (never on the paper's trace), they are scaled down proportionally and
+        the remainder is zero.
+        """
+        floors = {}
+        for s in self.slices:
+            floors[s.name] = (min(s.last_demand * self.headroom, self.capacity * 0.5)
+                              if s.priority <= 2 else 0.0)
+        reserved = sum(floors.values())
+        if reserved > self.capacity:
+            scale = self.capacity / reserved
+            floors = {n: f * scale for n, f in floors.items()}
+            reserved = self.capacity
+        spare = self.capacity - reserved
+        return {n: floors[n] + float(share[i]) * spare
+                for i, n in enumerate(self.names)}
 
 
 def make_env(**kw):
