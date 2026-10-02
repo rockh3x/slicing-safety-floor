@@ -5,7 +5,7 @@ THE QUESTION
 
   Every result so far applies the safety floor from step 0. The floor at
   h = 1.35 is below h* = 1.3765, so it cannot satisfy the SLA it enforces, and
-  the policy sits in the action-invariant region for ~500k steps at 144/144
+  the policy sits in the action-invariant region for 700k-1M steps at 144/144
   violations.
 
   But the invariant region is only reachable if the floor BINDS. It binds when
@@ -48,6 +48,10 @@ THE QUESTION
   find the floor - but from 1.6-2.2 rather than from 5, so the descent should
   be shorter and the total damage smaller than the always-on condition.
 
+  OUTCOME (real Milan trace, 8 seeds): DELAYED at 150k (5 of 8 seeds fall
+  into the region after the switch), AVOIDED at 300k and 500k (no seed does).
+  The prediction held only for the earliest switch.
+
 WHY THIS IS WORTH A SUBSECTION
 
   If confirmed, it separates two things the paper currently conflates: an
@@ -63,9 +67,9 @@ WHY THIS IS WORTH A SUBSECTION
 BASELINES ARE NOT RE-RUN
 
   switch_at = 0        is already measured: fix_sweep.py --overrides 0
-                       -> 1,886 total violations, 506,250 stagnation steps
+                       -> 2,802 total violations, 931,250 stagnation steps
   switch_at = never    is already measured: plateau_sweep.py --headrooms 0
-                       -> 135 total violations, 0 stagnation steps
+                       -> 268 total violations, 0 stagnation steps
   This script runs only the intermediate switch times and reports against them.
 
 REPORTED PER RUN
@@ -76,7 +80,7 @@ REPORTED PER RUN
                          total failure; -1 if it never happens. This is the
                          discriminating measurement.
      steps_trapped_post  stagnation steps counted only after the switch - the
-                         quantity the always-on condition scores 506,250 on
+                         quantity the always-on condition scores 931,250 on
      viol_pre/post       violations summed before / after the switch
      rebound             1 if the policy was clear of the floor at the switch
                          and fell in anyway (expected, per the note above)
@@ -91,7 +95,11 @@ OUTPUT
      delay_sweep.csv, delay_traj.csv
 """
 
-import argparse, csv, os, time
+import argparse, csv, os, sys, time
+
+# Make the repository root importable when run as `python sweeps/delay_sweep.py`.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import numpy as np
 from stable_baselines3 import PPO
 
@@ -289,12 +297,12 @@ def main():
           f"({'BELOW h* - not self-sufficient' if a.headroom < h_star else 'at/above h*'})")
     print(f"{n} runs: {len(a.switch_at)} switch times x {a.seeds} seeds "
           f"@ {a.steps:,} steps, {a.jobs} in parallel")
-    print("already measured, not re-run:")
-    print("   floor from step 0     1,886 violations, 506,250 stagnation steps")
-    print("   floor never on          135 violations,       0 stagnation steps")
+    print("already measured, not re-run (paper config):")
+    print("   floor from step 0     2,802 violations, 931,250 stagnation steps")
+    print("   floor never on          268 violations,       0 stagnation steps")
     print("registered prediction: DELAYED - the policy still descends into the")
     print("region after a late switch, but from a lower starting ratio, so")
-    print("steps_to_trap_post is finite and total_viol < 1,886.")
+    print("steps_to_trap_post is finite and total_viol < 2,802.")
     print("steps_to_trap_post = -1 on most seeds would falsify it.\n")
 
     new_s, new_t = not os.path.exists(a.out), not os.path.exists(a.traj)

@@ -33,7 +33,7 @@ ax.axhline(1.3765, color=INK, lw=1.4, ls=(0,(5,3)), zorder=3)
 ax.text(1.012, 1.3765, "$h^*$ = 1.3765\nSLA feasibility bound", va="center", ha="left",
         fontsize=8.6, color=INK, linespacing=1.4)
 
-ax.annotate("All shielded seeds remain at exactly 1.35 for\n750k–1M steps; below $h^*$, so every\nevaluation step violates the SLA",
+ax.annotate("All shielded seeds remain at exactly 1.35 for\n700k–1M steps; below $h^*$, so every\nevaluation step violates the SLA",
             xy=(0.50,1.352), xytext=(0.335,3.30), fontsize=9, color=SEC,
             ha="left", va="bottom", linespacing=1.45,
             arrowprops=dict(arrowstyle="-|>", color=MUT, lw=1.1, shrinkA=6, shrinkB=3))

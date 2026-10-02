@@ -1,4 +1,4 @@
-"""Network slicing simulator - Phase 1 (comprehensive-exam build)."""
+"""Network slicing simulator for the safety-floor self-sufficiency study."""
 from .slices import Slice, default_slices
 from .traffic import TrafficModel, SCENARIOS
 from .environment import SlicingEnv

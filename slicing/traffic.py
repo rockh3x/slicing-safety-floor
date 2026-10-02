@@ -1,14 +1,12 @@
 """
 traffic.py
 ----------
-Generates per-step demand for each slice.
+Generates per-step demand for each slice from fixed scenarios.
 
-Demand is what makes slicing hard: if it were constant you would allocate once
-and walk away. It moves, so SOMETHING must keep re-deciding the split - that
-'something' is a static rule today (Phase 1/2) and a learning agent later
-(Phase 3, your Objective 2).
+Used by the early fixed-rule demo only; the paper's experiments are driven by
+milan_traffic.MilanTraffic.
 
-Scenarios mirror the website's 'be the AI' game:
+Scenarios:
     quiet   - 2 AM,  everything low
     office  - 11 AM, video climbs
     match   - 8 PM,  video demand explodes (the surge)

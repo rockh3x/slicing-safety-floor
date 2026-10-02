@@ -4,10 +4,8 @@ allocators.py
 The 'brain' that decides how many units each slice requests. Swapping the brain
 is the whole experiment: the environment never changes, only this does.
 
-Phase 1-2 ship three FIXED-RULE brains so you have honest baselines to beat.
-Phase 3 (post-exam) adds an RL brain with the SAME .decide(obs, ...) signature,
-which is exactly your Objective 2 - and because they share the interface, the
-RL agent drops in with zero changes to the environment.
+These are the FIXED-RULE baselines. The learned policy is trained through
+gym_env.SlicingGymEnv on the same environment, so both are scored identically.
 
 Every allocator implements:
     decide(demand: dict, capacity: float, slices: list) -> dict {name: units}
@@ -31,7 +29,7 @@ class DemandProportionalAllocator:
     """Heuristic baseline: give each slice a share proportional to its demand.
 
     Much better than equal, and a genuinely respectable baseline. Its weakness:
-    it is 'blind' to criticality - under heavy load it will shave the surgery
+    it is 'blind' to criticality - under heavy load it will shave the URLLC
     slice just as readily as the video slice, because it only looks at size.
     """
     name = "proportional"
@@ -47,9 +45,9 @@ class PrioritySafeAllocator:
     """Smarter heuristic: serve critical slices to their demand first, then
     share the remainder among the rest by demand.
 
-    This is the 'hand-crafted safety' baseline. It usually keeps every SLA, and
-    it is the bar your future RL agent must MATCH on safety while BEATING on
-    efficiency. Being able to say that sentence in the viva is worth a lot.
+    This is the 'hand-crafted safety' baseline. Granting exactly demand puts
+    the queue load at 1.0, past the latency model's knee, so on the paper's
+    trace it fails both latency SLAs on every step - see HeadroomAllocator.
     """
     name = "priority-safe"
 

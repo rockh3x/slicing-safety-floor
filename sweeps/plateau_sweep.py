@@ -30,18 +30,20 @@ WHY THIS RUN EXISTS
      R7's over-allocation penalty says "allocate less". So the shield does
      not merely fail to teach; it CENSORS the upward gradient and leaves the
      downward one. Drift is therefore directional, not diffusive, and its
-     probability rises with headroom - which is the 0/8 -> 6/8 curve already
-     measured.
+     probability rises with headroom - the 0/8 -> 6/8 curve seen in the
+     preliminary (synthetic-trace) abdication sweep.
 
 WHAT IS LOGGED THAT WAS NOT BEFORE
 
      alloc_ratio        mean granted_urllc / demand_urllc.  Directly
                         comparable to h* = 1.3765; works with the shield off,
                         which `ratio` (request vs floor) does not.
-     frac_below_hstar   fraction of steps with granted/demand < h*.  This
-                        should predict violations almost perfectly and turns
-                        the finding from a correlation into an accounting
-                        identity.
+     frac_below_hstar   fraction of steps with granted_urllc/demand_urllc
+                        < h*. Equals the URLLC violation fraction exactly (an
+                        identity of the latency model, not a correlation).
+                        With the floor on it accounts for every critical
+                        violation; with it off, VoLTE can also violate and
+                        `crit` exceeds frac_below_hstar * steps.
      frac_plateau       fraction of steps in the action-invariant region
                         (both critical slices clipped) = the fraction of the
                         rollout carrying zero gradient. The mechanism's own
@@ -51,16 +53,22 @@ WHAT IS LOGGED THAT WAS NOT BEFORE
                         than inferred from an endpoint.
 
 USAGE
-     python plateau_sweep.py                          # full sweep, 8 seeds
-     python plateau_sweep.py --headrooms 0 1.35       # control vs collapse
-     python plateau_sweep.py --seeds 4 --steps 150000 # quick look
+     python sweeps/plateau_sweep.py                          # full sweep, 8 seeds
+     python sweeps/plateau_sweep.py --headrooms 0 1.35       # control vs collapse
+     python sweeps/plateau_sweep.py --seeds 4 --steps 150000 # quick look
+     The defaults are the original exploratory settings (lr 3e-4, no KL cap,
+     250k steps). The paper's configuration is given in README.md.
 
 OUTPUT
      plateau_sweep.csv       one row per run
      plateau_traj.csv        one row per checkpoint per run
 """
 
-import argparse, csv, os, time
+import argparse, csv, os, sys, time
+
+# Make the repository root importable when run as `python sweeps/plateau_sweep.py`.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import numpy as np
 from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import BaseCallback

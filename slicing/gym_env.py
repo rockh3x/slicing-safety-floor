@@ -1,12 +1,12 @@
 """
-gym_env.py - Gymnasium wrapper around the calibrated slicing environment
-========================================================================
+gym_env.py - Gymnasium wrapper around the slicing environment
+=============================================================
 Turns SlicingEnv into a standard RL environment so Stable-Baselines3 (or any
 Gymnasium-compatible library) can train on it without custom glue.
 
 WHY A WRAPPER RATHER THAN A REWRITE
-    SlicingEnv already has reset/step and the calibrated latency model. This
-    only translates between dict-of-slices and the flat float arrays that RL
+    SlicingEnv already has reset/step and the latency model. This only
+    translates between dict-of-slices and the flat float arrays that RL
     libraries expect - and adds the safety layer as a toggle, so constrained
     and unconstrained agents run on an otherwise identical environment. That
     is what makes the comparison fair.
@@ -14,9 +14,8 @@ WHY A WRAPPER RATHER THAN A REWRITE
 OBSERVATION  (3 values per slice, normalised to roughly [0, 2])
     demand / capacity        what this slice is asking for
     last_alloc / capacity    what it got last step
-    rho                      system load (repeated - the agent needs it,
-                             because the calibrated model says queueing
-                             delay depends on SYSTEM load, not just own share)
+    rho                      system load, total demand / capacity (repeated
+                             per slice)
 
 ACTION  (1 value per slice, in [-1, 1])  ->  softmax over the vector
     A BUG WORTH RECORDING: the first version used weights in [0,1] normalised
@@ -31,17 +30,17 @@ ACTION  (1 value per slice, in [-1, 1])  ->  softmax over the vector
     the mapping is one-to-one, and the bounds are not attractors.
 
 REWARD
-    mean satisfaction  +  0.2 * utilisation  -  penalty * weighted violations
-
-    Per-slice penalty weights matter enormously. With equal weights the agent
-    learns proportional allocation and sacrifices the critical slice - the
-    exact failure the measurements showed (94 URLLC violations). Weighting
-    URLLC violations far higher is what makes safety learnable rather than
-    merely hoped for.
+    Selected by name from rewards.REWARDS (reward=...). The paper uses
+    "asymmetric_over0.5": per-step asymmetric deviation from 1.5x demand for
+    the latency-critical slices, satisfaction for the elastic one, weighted by
+    PENALTY_WEIGHT. The default, "R1_baseline", is the original design kept
+    for the reward study.
 
 SAFETY LAYER  (safe=True)
-    Clips the action so no slice falls below min_guarantee * headroom before
-    it reaches the environment. Every clip is counted in info["clipped"], so
+    Raises each latency-critical slice to its floor, min(demand * headroom,
+    capacity / 2), and reclaims the excess only from what each slice asked
+    for above its own floor - see _safety_filter. Every clip is counted in
+    info["clipped"] and the capacity the filter moved in info["override"], so
     "how often did the policy try to violate safety?" is measurable.
 """
 
@@ -168,9 +167,11 @@ class SlicingGymEnv(gym.Env):
         requested -> what the policy asked for
         returns   -> (granted, n_clipped) after enforcing the floors
 
-        Measurement basis: allocating a latency-critical slice exactly its
-        demand pins its queue utilisation at 1.0, where delay diverges. On the
-        HTB testbed VoNR held 0.35 ms p95 with ~12x headroom.
+        Rationale: allocating a latency-critical slice exactly its demand pins
+        its queue load at 1.0, well past the latency model's knee, so the floor
+        is set at a multiple of demand. Whether that multiple is high enough
+        is the paper's question: below h* = 1.3765 a binding floor cannot meet
+        the 5 ms URLLC target.
         """
         # minimum each latency-critical slice must receive this step
         minimum_required, n_clipped = {}, 0

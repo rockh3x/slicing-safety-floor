@@ -15,17 +15,23 @@ WHY THIS EXISTS
   held-out evaluation seed, the same three 144-step episodes, the same metrics.
 
 REPORTED
-     crit        critical-slice SLA violations out of 432 evaluated steps
-     alloc/d     mean allocation ratio of the critical slice
+     crit        critical-slice SLA violations over 432 evaluated steps,
+                 summed over urllc and volte (so at most 864)
+     urllc       the urllc part of crit (at most 432)
+     alloc/d     mean allocation ratio of the urllc slice
      tau         carried load, sum min(a,d) / sum d
      tau_<slice> per-slice served fraction
 
 USAGE
-     python baseline_eval.py
-     python baseline_eval.py --headrooms 1.0 1.2 1.35 1.3765 1.5 2.0
+     python sweeps/baseline_eval.py
+     python sweeps/baseline_eval.py --headrooms 1.0 1.2 1.35 1.3765 1.5 2.0
 """
 
-import argparse, csv
+import argparse, csv, os, sys
+
+# Make the repository root importable when run as `python sweeps/baseline_eval.py`.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import numpy as np
 
 from slicing.clara_slices import clara_slices
@@ -94,7 +100,7 @@ def main():
     rules += [(f"headroom h={h:g}", HeadroomAllocator(h)) for h in a.headrooms]
 
     rows = []
-    print(f"{'rule':<20}{'crit/432':>10}{'alloc/d':>10}{'tau':>8}"
+    print(f"{'rule':<20}{'crit/864':>10}{'alloc/d':>10}{'tau':>8}"
           f"{'urllc':>8}{'volte':>8}{'video':>8}")
     print("-" * 72)
     for name, rule in rules:

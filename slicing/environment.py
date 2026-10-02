@@ -1,13 +1,11 @@
 """
 environment.py
 --------------
-The network slicing environment. This is the heart of the project and the
-piece you will point at in the viva.
+The network slicing environment.
 
 It deliberately uses the SAME interface shape as reinforcement-learning
-environments (reset / step), even though Phase 1-2 drive it with fixed rules.
-That is the seam that lets an RL agent (Phase 3 / SENTINEL Objective 2) plug in
-later WITHOUT rewriting anything:
+environments (reset / step), so fixed-rule allocators and a learning agent
+(through gym_env.SlicingGymEnv) drive the same code:
 
     obs            = env.reset()
     obs, reward, done, info = env.step(action)
@@ -17,12 +15,12 @@ later WITHOUT rewriting anything:
     reward = utilisation reward  -  penalty for SLA violations
     info   = full per-slice detail for logging, metrics and plots
 
-Contention rule (important, and easy to defend):
+Contention rule:
     Slices REQUEST units. If total request > capacity, the network cannot
     invent bandwidth, so requests are scaled down. We scale the *discretionary*
-    part only: min_guarantee units are protected first (this is the honest,
-    Phase-1 version of Objective 3's safety idea), and the remainder is shared
-    proportionally.
+    part only: min_guarantee units are protected first, and the remainder is
+    shared proportionally. (The demand-proportional safety floor studied in
+    the paper is applied earlier, in gym_env.SlicingGymEnv._safety_filter.)
 """
 
 import numpy as np
@@ -33,7 +31,7 @@ class SlicingEnv:
                  isolation=True):
         """isolation=True  -> each slice gets its own queue (hard slicing).
            isolation=False -> one shared queue (soft / best-effort).
-        Mirrors the two modes measured on the HTB testbed."""
+        The paper uses isolation=True throughout."""
         self.slices = slices
         self.traffic = traffic
         self.capacity = float(capacity)
@@ -56,9 +54,9 @@ class SlicingEnv:
         alloc = self._resolve_contention(action)
 
         # System load ratio: total demand across all slices / capacity.
-        # This drives the calibrated queueing term in the latency model - see
-        # the note in slices.py. Measured on the HTB testbed: queueing delay
-        # depends on SYSTEM utilisation, not only per-slice adequacy.
+        # Only a slice in a SHARED queue (isolation=False) takes its latency
+        # from this; an isolated slice uses its own demand/alloc - see
+        # Slice.latency_ms in slices.py.
         rho = sum(self._demand.values()) / self.capacity if self.capacity > 0 else 0.0
 
         # score every slice against the demand it faced this step

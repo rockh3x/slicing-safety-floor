@@ -1,10 +1,9 @@
 """
 metrics.py
 ----------
-Turns a run's per-step logs into the summary numbers you report.
+Turns a run's per-step logs into summary numbers.
 
-These four are the KPIs you will defend and, later, the ones your RL reward is
-built from. They are deliberately IMT-2030-flavoured:
+Four KPIs, IMT-2030-flavoured:
     sla_violation_rate  -> reliability   (lower is better)
     mean_utilisation    -> efficiency    (higher is better, but not at any cost)
     mean_satisfaction   -> QoE           (higher is better)

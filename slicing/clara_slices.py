@@ -12,10 +12,10 @@ Mapping onto our framework (and the simplifications, stated honestly):
   VoLTE         URLLC        latency <= 20 ms                voice: small bw, delay-bound
   URLLC         URLLC        latency <= 5 ms                 strict delay guarantee
 
-Honest simplification: CLARA formulates per-slice *delay* constraints computed
-from queueing behaviour. Our latency proxy is the convex function in slices.py
-(latency grows as allocation/demand ratio falls). Same direction of effect,
-simpler mechanics - say this to the DC before they ask.
+Simplification: CLARA formulates per-slice *delay* constraints computed from
+queueing behaviour. Our latency proxy is the assumed convex function in
+slices.py (latency grows as the allocation/demand ratio falls). Same direction
+of effect, simpler mechanics.
 
 Priorities: URLLC (1) > VoLTE (2) > video (3), so the criticality-aware
 baseline protects voice and URLLC and lets video absorb overload - which is

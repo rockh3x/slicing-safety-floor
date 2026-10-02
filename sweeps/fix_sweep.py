@@ -7,26 +7,28 @@ WHAT THE STABILISED RUN ESTABLISHED (and why this is the last experiment)
   monotone learning curve. The shield effect survives, and in a much starker
   form.
 
-      condition        ckpts at 100% violation   total violations   worst
-      no shield              0 / 160                    135          16%
-      shield h=1.35        81 / 160                   1,886         100%
+  Real Milan trace, 8 seeds, 1M steps (mean total violations per run):
 
-  Every shielded seed sits at exactly alloc/demand = 1.35, frac_plateau = 1.0,
-  144/144 violations, for 350,000-650,000 steps. The unshielded agent NEVER
-  exceeds 16% violations at any point in training. The shield does not merely
-  slow learning down - it holds the policy at total SLA failure for half a
-  million steps, then lets it crawl out.
+      condition        ckpts at 100% violation   total violations   worst
+      no shield              0 / 160                    268          43%
+      shield h=1.35        149 / 160                  2,802         100%
+
+  Every shielded seed sits at exactly alloc/demand = 1.35, frac_plateau ~0.79,
+  144/144 violations, for 700,000-1,000,000 steps. The unshielded agent never
+  exceeds 62/144 violations at any checkpoint. The shield does not merely slow
+  learning down - it holds the policy at total SLA failure for most of the
+  budget, and no shielded seed reaches sustained safety within it.
 
 WHY THE AGENT IS STUCK, AND WHAT ESCAPES IT
 
   Inside the plateau the granted allocation is independent of the action, so
   the reward is constant and the gradient is exactly zero. Deterministic
-  evaluation shows frac_plateau = 1.0: nothing the policy does changes
-  anything. Escape is therefore NOT gradient-driven - it is driven by
-  exploration noise occasionally sampling an action outside the plateau. That
-  predicts escape time should scale with entropy and inversely with learning
-  rate, which is exactly what happened when lr dropped 3e-4 -> 1e-4 and the
-  trapped phase grew from ~150k to ~500k steps.
+  evaluation shows the policy inside the region on ~79% of evaluated states.
+  Escape is therefore NOT gradient-driven - it is driven by exploration noise
+  occasionally sampling an action outside the plateau. That predicts escape
+  time should scale inversely with learning rate, which is what happened when
+  lr dropped 3e-4 -> 1e-4 and the mean trapped phase grew from 500k to 931k
+  steps.
 
 TWO REMEDIES, ONE OF WHICH IS THE LITERATURE'S
 
@@ -63,7 +65,11 @@ OUTPUT
      fix_sweep.csv, fix_traj.csv
 """
 
-import argparse, csv, os, time
+import argparse, csv, os, sys, time
+
+# Make the repository root importable when run as `python sweeps/fix_sweep.py`.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import numpy as np
 from stable_baselines3 import PPO
 
@@ -210,8 +216,8 @@ def main():
           f"({'BELOW h* - floor is not self-sufficient' if a.headroom < h_star else 'at/above h*'})")
     print(f"{n} runs: {len(combos)} (override, ent) combos x {a.seeds} seeds "
           f"@ {a.steps:,} steps, {a.jobs} in parallel")
-    print("baseline for comparison - shield, no fix: "
-          "trapped ~500k steps, 1,886 total violations\n")
+    print("baseline for comparison - shield, no fix (paper config): "
+          "trapped 931,250 steps on average, 2,802 total violations\n")
 
     new_s, new_t = not os.path.exists(a.out), not os.path.exists(a.traj)
     fs, ft = open(a.out, "a", newline=""), open(a.traj, "a", newline="")

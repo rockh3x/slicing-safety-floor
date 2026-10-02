@@ -99,8 +99,8 @@ def r_risk_sensitive(per_slice, slices, util):
 def r_headroom(per_slice, slices, util):
     """R5 - reward critical slices for holding headroom, not just for coping.
 
-    Directly encodes the measured finding: allocating exactly demand pins
-    queue utilisation at 1.0, where delay diverges. Reward peaks at ~1.5x
+    Encodes the latency model's consequence: allocating exactly demand pins
+    queue load at 1.0, well past the knee. Reward peaks at ~1.5x
     demand and falls off on both sides - too little is unsafe, too much
     starves the elastic slice.
     """
