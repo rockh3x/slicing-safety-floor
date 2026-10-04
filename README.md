@@ -58,6 +58,11 @@ python -m venv .venv && . .venv/bin/activate     # Windows: .venv\Scripts\activa
 pip install -r requirements.txt
 ```
 
+The paper's numbers were produced on Python 3.12.10 with the versions pinned in
+`requirements.txt`. The same stack also installs on Python 3.14, where
+`baseline_eval.py` and the figure scripts reproduce the committed results to
+floating-point precision.
+
 Then follow `data/README.md` to obtain the traffic file. Nothing runs without it,
 by design.
 
